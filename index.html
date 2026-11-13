@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#111111">
+<title>Door Sign</title>
+<style>
+  :root { --bg:#111; --card:#1d1d1f; --text:#f2f2f2; --dim:#9a9a9f; --line:#2c2c2e; --accent:#f5a623; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin:0; background:var(--bg); color:var(--text);
+         font: 16px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+         padding: max(16px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom)); }
+  h1 { font-size: 22px; margin: 0; }
+  header { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:14px; }
+  #conn { border:0; border-radius:999px; padding:10px 16px; font-weight:600; font-size:15px;
+          background:var(--accent); color:#111; }
+  #conn.on { background:#2c2c2e; color:var(--dim); }
+  #msg { color:var(--dim); font-size:14px; min-height:20px; margin: -6px 0 12px; }
+  #msg.err { color:#ff6b5e; }
+  .grid { display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
+  .st { border:0; border-radius:16px; min-height:78px; padding:12px; color:#fff; font-weight:700;
+        font-size:17px; text-align:left; display:flex; flex-direction:column; justify-content:space-between;
+        opacity:.55; transition: opacity .15s, transform .1s; }
+  .st:active { transform: scale(.97); }
+  .st.cur { opacity:1; outline:3px solid #fff; outline-offset:-3px; }
+  .st small { font-weight:500; font-size:12px; opacity:.85; }
+  .wide { grid-column: span 2; }
+  details { background:var(--card); border-radius:16px; margin-top:14px; padding: 4px 14px; }
+  summary { font-weight:600; padding:12px 0; cursor:pointer; }
+  label { display:block; color:var(--dim); font-size:13px; margin:10px 0 4px; }
+  input[type=text], input[type=time], select { width:100%; font-size:16px; padding:10px; border-radius:10px;
+        border:1px solid var(--line); background:#000; color:var(--text); }
+  .row { display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
+  .sw { display:flex; gap:8px; flex-wrap:wrap; margin-top:6px; }
+  .sw button { width:36px; height:36px; border-radius:50%; border:3px solid transparent; }
+  .sw button.sel { border-color:#fff; }
+  .go { width:100%; margin:14px 0 10px; padding:12px; border:0; border-radius:12px; font-weight:700;
+        font-size:16px; background:var(--accent); color:#111; }
+  .count { float:right; }
+  .toggle { display:flex; align-items:center; gap:10px; margin-top:12px; color:var(--text); }
+  .toggle input { width:22px; height:22px; }
+  .note { color:var(--dim); font-size:13px; margin:8px 0 12px; }
+  button:disabled { opacity:.35 !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Door Sign</h1>
+  <button id="conn">Connect</button>
+</header>
+<div id="msg">Open this page in Bluefy, then tap Connect.</div>
+
+<div class="grid" id="grid"></div>
+
+<details id="customBox">
+  <summary>Custom status</summary>
+  <label>Text <span class="count" id="count">0 / 40</span></label>
+  <input type="text" id="ctext" maxlength="40" placeholder="e.g. Exam tomorrow - quiet please">
+  <label>Colour</label>
+  <div class="sw" id="swatches"></div>
+  <button class="go" id="csend">Show on the door</button>
+</details>
+
+<details>
+  <summary>Night schedule</summary>
+  <div class="toggle"><input type="checkbox" id="en"><span>Switch to "Sleeping" at night</span></div>
+  <label>Weeknights (Sun–Thu): bedtime / wake-up</label>
+  <div class="row"><input type="time" id="wdOn"><input type="time" id="wdOff"></div>
+  <label>Weekend nights (Fri + Sat): bedtime / wake-up</label>
+  <div class="row"><input type="time" id="weOn"><input type="time" id="weOff"></div>
+  <p class="note">In the morning the sign goes back to what it showed before bedtime.</p>
+  <button class="go" id="ssend">Save schedule</button>
+</details>
+
+<details>
+  <summary>Display</summary>
+  <label>Display type (pick the one where colours look right)</label>
+  <select id="drv">
+    <option value="0">ILI9341</option>
+    <option value="1">ILI9341, inverted colours</option>
+    <option value="2">ST7789</option>
+    <option value="3">ST7789, inverted colours</option>
+  </select>
+  <p class="note" id="fw"></p>
+</details>
+
+<script>
+const UUID = n => `7d1f000${n}-5c3b-4c2e-9a51-2f6e0d3b9a10`;
+const SVC = UUID(1);
+const STATUSES = [
+  [1, 'Do not disturb', '#c80000'], [2, 'Busy', '#f07800'], [3, 'Come in', '#00a03c'],
+  [4, 'In a call', '#8228b4'], [5, 'Working', '#145ac8'], [6, 'Sleeping', '#0a1446'], [7, 'Away', '#5a5a5a'],
+];
+const PALETTE = ['#c80000', '#f07800', '#e6c800', '#00a03c', '#008c8c', '#145ac8', '#8228b4', '#e63c8c'];
+
+const $ = id => document.getElementById(id);
+let device = null, ch = {}, state = null, col = 0;
+
+function msg(t, err) { $('msg').textContent = t; $('msg').className = err ? 'err' : ''; }
+
+// ---- UI
+for (const [id, name, c] of STATUSES) {
+  const b = document.createElement('button');
+  b.className = 'st' + (id === 7 ? ' wide' : '');
+  b.style.background = c; b.dataset.id = id;
+  b.innerHTML = `<span>${name}</span><small></small>`;
+  b.onclick = () => send('set', { s: id });
+  $('grid').appendChild(b);
+}
+PALETTE.forEach((c, i) => {
+  const b = document.createElement('button');
+  b.style.background = c; b.onclick = () => { col = i; paintSwatches(); };
+  $('swatches').appendChild(b);
+});
+function paintSwatches() { [...$('swatches').children].forEach((b, i) => b.classList.toggle('sel', i === col)); }
+paintSwatches();
+$('ctext').oninput = () => { $('count').textContent = `${$('ctext').value.length} / 40`; };
+$('csend').onclick = () => {
+  const txt = $('ctext').value.replace(/[^\x20-\x7e]/g, '').trim();
+  if (!txt) return msg('Type a short text first (plain letters, no emoji).', true);
+  send('set', { s: 0, txt, col });
+};
+$('ssend').onclick = () => send('schedule', {
+  wd: { on: $('wdOn').value, off: $('wdOff').value },
+  we: { on: $('weOn').value, off: $('weOff').value },
+  enabled: $('en').checked,
+});
+$('drv').onchange = () => send('display', { drv: +$('drv').value });
+
+function hhmm(t) { const d = new Date(t * 1000); return String(d.getUTCHours()).padStart(2, '0') + ':' + String(d.getUTCMinutes()).padStart(2, '0'); }
+
+function showState(s) {
+  state = s;
+  for (const b of $('grid').children) {
+    const on = +b.dataset.id === s.s;
+    b.classList.toggle('cur', on);
+    b.querySelector('small').textContent = on ? (s.since && s.clock ? `since ${hhmm(s.since)}` : 'now') : '';
+  }
+  if (s.s === 0) { $('ctext').value = s.txt; col = s.col; paintSwatches(); $('ctext').oninput(); }
+  $('drv').value = s.drv;
+  $('fw').textContent = `Firmware ${s.fw}`;
+}
+function showSchedule(s) {
+  $('wdOn').value = s.wd.on; $('wdOff').value = s.wd.off;
+  $('weOn').value = s.we.on; $('weOff').value = s.we.off; $('en').checked = s.enabled;
+}
+function setEnabled(on) {
+  document.querySelectorAll('.st, .go, select').forEach(b => b.disabled = !on);
+  $('conn').textContent = on ? 'Connected' : 'Connect';
+  $('conn').classList.toggle('on', on);
+}
+setEnabled(false);
+
+// ---- Bluetooth
+const enc = new TextEncoder(), dec = new TextDecoder();
+const CH = { state: UUID(2), set: UUID(3), time: UUID(4), schedule: UUID(5), display: UUID(6) };
+
+async function connect() {
+  if (!navigator.bluetooth) return msg('No Bluetooth in this browser. On iPhone, open this page in the Bluefy app.', true);
+  try {
+    if (!device) {
+      device = await navigator.bluetooth.requestDevice({ filters: [{ services: [SVC] }] });
+      device.addEventListener('gattserverdisconnected', () => { setEnabled(false); msg('Disconnected. Tap Connect to reconnect.'); });
+    }
+    msg('Connecting…');
+    const gatt = await device.gatt.connect();
+    const svc = await gatt.getPrimaryService(SVC);
+    for (const [k, u] of Object.entries(CH)) ch[k] = await svc.getCharacteristic(u);
+    msg('If your iPhone asks for a code, enter the one shown on the sign.');
+    // reading an encrypted value is what makes iOS pair (first time only)
+    showState(JSON.parse(dec.decode(await ch.state.readValue())));
+    showSchedule(JSON.parse(dec.decode(await ch.schedule.readValue())));
+    await sendTime();
+    await ch.state.startNotifications();
+    ch.state.addEventListener('characteristicvaluechanged', e => showState(JSON.parse(dec.decode(e.target.value))));
+    setEnabled(true);
+    msg('Connected.');
+  } catch (e) {
+    setEnabled(false);
+    const t = String(e && e.message || e);
+    if (/cancel/i.test(t)) msg('Cancelled.');
+    else if (/auth|encrypt|insufficient/i.test(t)) msg('Not paired. On the sign: hold the screen and press BOOT, then connect again.', true);
+    else msg('Could not connect: ' + t, true);
+  }
+}
+async function sendTime() {
+  const now = Date.now();
+  await ch.time.writeValueWithResponse(enc.encode(JSON.stringify({ epoch: Math.floor(now / 1000), tz: -new Date(now).getTimezoneOffset() })));
+}
+async function send(kind, obj) {
+  if (!ch[kind] || !device || !device.gatt.connected) return msg('Not connected.', true);
+  try {
+    await ch[kind].writeValueWithResponse(enc.encode(JSON.stringify(obj)));
+    if (kind === 'schedule') { showSchedule(JSON.parse(dec.decode(await ch.schedule.readValue()))); msg('Schedule saved.'); }
+    else if (kind === 'display') msg('Display type changed. Look at the sign.');
+    else msg('Done.');
+  } catch (e) { msg('Failed: ' + (e.message || e), true); }
+}
+$('conn').onclick = connect;
+// Bluefy can't stay connected in the background: reconnect when the page comes back
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && device && !device.gatt.connected) connect();
+});
+</script>
+</body>
+</html>
