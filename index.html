@@ -87,6 +87,13 @@
 </details>
 
 <script>
+window.addEventListener('error', function (e) {
+  var m = document.getElementById('msg');
+  if (m) { m.textContent = 'Page error: ' + e.message + ' (line ' + e.lineno + ')'; m.className = 'err'; }
+});
+</script>
+<script>
+(function () {
 const UUID = n => `7d1f000${n}-5c3b-4c2e-9a51-2f6e0d3b9a10`;
 const SVC = UUID(1);
 const STATUSES = [
@@ -206,11 +213,12 @@ async function send(kind, obj) {
 $('conn').onclick = () => { msg('Connect tapped…'); connect(); };
 window.addEventListener('error', e => msg('Page error: ' + e.message, true));
 window.addEventListener('unhandledrejection', e => msg('Page error: ' + (e.reason && e.reason.message || e.reason), true));
-msg(navigator.bluetooth ? 'Page v2 ready. Tap Connect.' : 'Page v2: no Bluetooth here. Open this page in the Bluefy app.', !navigator.bluetooth);
+msg(navigator.bluetooth ? 'Page v3 ready. Tap Connect.' : 'Page v3: no Bluetooth here. Open this page in the Bluefy app.', !navigator.bluetooth);
 // Bluefy can't stay connected in the background: reconnect when the page comes back
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && device && !device.gatt.connected) connect();
 });
+})();
 </script>
 </body>
 </html>
