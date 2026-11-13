@@ -161,7 +161,11 @@ async function connect() {
   if (!navigator.bluetooth) return msg('No Bluetooth in this browser. On iPhone, open this page in the Bluefy app.', true);
   try {
     if (!device) {
-      device = await navigator.bluetooth.requestDevice({ filters: [{ services: [SVC] }] });
+      msg('Looking for the sign… (if no list appears: iPhone Settings → Bluefy → allow Bluetooth)');
+      device = await navigator.bluetooth.requestDevice({
+        filters: [{ services: [SVC] }, { name: 'DoorSign' }, { namePrefix: 'Door' }],
+        optionalServices: [SVC],
+      });
       device.addEventListener('gattserverdisconnected', () => { setEnabled(false); msg('Disconnected. Tap Connect to reconnect.'); });
     }
     msg('Connecting…');
@@ -179,7 +183,8 @@ async function connect() {
     msg('Connected.');
   } catch (e) {
     setEnabled(false);
-    const t = String(e && e.message || e);
+    if (device && !device.gatt.connected) device = null;   // let the next tap show the list again
+    const t = String(e && (e.name ? e.name + ': ' : '') + (e.message || '') || e);
     if (/cancel/i.test(t)) msg('Cancelled.');
     else if (/auth|encrypt|insufficient/i.test(t)) msg('Not paired. On the sign: hold the screen and press BOOT, then connect again.', true);
     else msg('Could not connect: ' + t, true);
@@ -198,7 +203,10 @@ async function send(kind, obj) {
     else msg('Done.');
   } catch (e) { msg('Failed: ' + (e.message || e), true); }
 }
-$('conn').onclick = connect;
+$('conn').onclick = () => { msg('Connect tapped…'); connect(); };
+window.addEventListener('error', e => msg('Page error: ' + e.message, true));
+window.addEventListener('unhandledrejection', e => msg('Page error: ' + (e.reason && e.reason.message || e.reason), true));
+msg(navigator.bluetooth ? 'Page v2 ready. Tap Connect.' : 'Page v2: no Bluetooth here. Open this page in the Bluefy app.', !navigator.bluetooth);
 // Bluefy can't stay connected in the background: reconnect when the page comes back
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && device && !device.gatt.connected) connect();
