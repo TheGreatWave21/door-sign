@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -193,7 +193,7 @@ async function connect() {
     if (device && !device.gatt.connected) device = null;   // let the next tap show the list again
     const t = String(e && (e.name ? e.name + ': ' : '') + (e.message || '') || e);
     if (/cancel/i.test(t)) msg('Cancelled.');
-    else if (/auth|encrypt|insufficient/i.test(t)) msg('Not paired. On the sign: hold the screen and press BOOT, then connect again.', true);
+    else if (/auth|encrypt|insufficient/i.test(t)) msg('Not paired. On the sign: hold BOOT for 3 seconds and let go, then connect again.', true);
     else msg('Could not connect: ' + t, true);
   }
 }
